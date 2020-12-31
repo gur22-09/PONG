@@ -1,0 +1,221 @@
+import { AfterViewInit, Component, ElementRef, OnInit, ViewChild } from '@angular/core';
+import { Store } from '@ngrx/store';
+import { DimensionBannerSearchService } from 'app/modules/readymade-templates/dimension-banner/dimension-banner-search/dimension-banner-search.service';
+import { fromEvent, Subscription } from 'rxjs';
+import { debounceTime, filter, takeUntil } from 'rxjs/operators';
+import { UnsubscribeComponent } from '../../../../general/unsubscribe.component';
+import { AddTemplatesService } from '../add-templates.service';
+
+@Component({
+  selector: 'app-search-templates',
+  templateUrl: './search-templates.component.html',
+  styleUrls: ['./search-templates.component.scss'],
+})
+export class SearchTemplatesComponent
+  extends UnsubscribeComponent
+  implements OnInit, AfterViewInit {
+  autoCompleteMode = false;
+  autoSuggestMode = false;
+  subscriptions: Subscription[] = [];
+  activeFocusIndex = null;
+  suggestFocusIndex: number | null = null;
+  @ViewChild('searchTerm') searchTermElementRef: ElementRef;
+
+  constructor(
+    public service: DimensionBannerSearchService,
+    private addTemplatesService: AddTemplatesService,
+  ) {
+    super();
+  }
+
+  ngOnInit() {}
+
+  searchFocused() {
+    if (!this.service.searchText || this.service.searchText.trim().length === 0) {
+      this.activeFocusIndex = null;
+      this.fetchAutoSuggestions();
+      this.enableAutoSuggest();
+    } else {
+      this.searchTextChanged();
+    }
+  }
+
+  redirectToSearch(searchTerm: ISearchTerm) {
+    this.autoCompleteMode = false;
+    this.autoSuggestMode = false;
+    this.service.autoSuggestResults = null;
+    this.service.autoCompleteResults = null;
+
+    this.service.redirectToSearch(searchTerm);
+  }
+
+  rawTextSearch() {
+    const searchTerm = this.service.searchText.trim();
+    if (this.activeFocusIndex !== null) {
+      const searchTerm = this.service.autoCompleteResults[this.activeFocusIndex].value;
+      this.selectSuggestion(searchTerm.trim());
+    } else if (searchTerm) {
+      this.selectSuggestion(this.service.searchText.trim());
+    }
+  }
+
+  selectSuggestion(searchTerm: string) {
+    this.addTemplatesService.fetchTemplatesOfCurrentDimension(searchTerm);
+    this.disableSearching(searchTerm);
+  }
+
+  private fetchAutoSuggestions() {
+    this.enableAutoSuggest();
+    this.service.fetchAutoSuggestions();
+  }
+
+  private searchTextChanged() {
+    if (this.service.searchText.trim().length >= 3) {
+      //enable autocomplete
+      this.autoSuggestMode = false;
+      this.service.autoSuggestResults = null;
+      this.suggestFocusIndex = null;
+      this.enableAutoComplete();
+      this.service.getAutoCompletePhrase(this.service.searchText);
+    } else {
+      this.autoSuggestMode = false;
+      this.autoCompleteMode = false;
+      this.service.autoCompleteResults = null;
+      this.service.autoSuggestResults = null;
+    }
+  }
+
+  enableAutoSuggest() {
+    this.autoSuggestMode = true;
+    this.autoCompleteMode = false;
+    // do autosuggest animation
+  }
+
+  enableAutoComplete() {
+    this.autoCompleteMode = true;
+    this.autoSuggestMode = false;
+  }
+
+  disableSearching(searchTerm) {
+    this.service.searchText = searchTerm;
+    this.autoSuggestMode = false;
+    this.autoCompleteMode = false;
+    this.service.autoCompleteResults = null;
+    this.service.autoSuggestResults = null;
+  }
+
+  clearSearch() {
+    this.disableSearching('');
+    this.activeFocusIndex = null;
+    this.suggestFocusIndex = null;
+  }
+
+  hideSearchDropDown() {
+    this.service.autoCompleteResults = null;
+    this.service.autoSuggestResults = null;
+  }
+
+  setActiveFocusIndex(keycode) {
+    if (this.autoCompleteMode && this.service.autoCompleteResults.length) {
+      const len = this.service.autoCompleteResults.length - 1;
+      if (keycode === 'ArrowDown') {
+        if (this.activeFocusIndex === null || this.activeFocusIndex === len) {
+          this.activeFocusIndex = 0;
+        } else {
+          this.activeFocusIndex += 1;
+        }
+      } else if (keycode === 'ArrowUp') {
+        if (this.activeFocusIndex === null || this.activeFocusIndex === 0) {
+          this.activeFocusIndex = len;
+        } else {
+          this.activeFocusIndex -= 1;
+        }
+      }
+    }
+
+    if (this.autoSuggestMode && this.service.autoSuggestResults.length) {
+      let len = 0;
+
+      let flattenedResults = [];
+      this.service.autoSuggestResults.forEach((resultObj) => {
+        flattenedResults = [...flattenedResults, ...resultObj.results];
+      });
+      len = flattenedResults.length;
+      console.log(flattenedResults, this.service.autoSuggestResults);
+
+      if (keycode === 'ArrowDown') {
+        if (this.suggestFocusIndex === null || this.suggestFocusIndex === len) {
+          this.suggestFocusIndex = 0;
+        } else {
+          this.suggestFocusIndex += 1;
+        }
+      } else if (keycode === 'ArrowUp') {
+        if (this.suggestFocusIndex === null || this.suggestFocusIndex === 0) {
+          this.suggestFocusIndex = len;
+        } else {
+          this.suggestFocusIndex -= 1;
+        }
+      }
+    }
+  }
+
+  ngAfterViewInit() {
+    if (this.searchTermElementRef && this.searchTermElementRef.nativeElement) {
+      fromEvent(this.searchTermElementRef.nativeElement, 'keyup')
+        .pipe(takeUntil(this._destroy$))
+        .pipe(
+          debounceTime(500),
+          // To make sure this doesn't interfere with other key events
+          filter(
+            (event: KeyboardEvent): boolean =>
+              event.code !== 'Enter' &&
+              event.code !== 'Escape' &&
+              event.code !== 'Tab' &&
+              event.code !== 'ArrowDown' &&
+              event.code !== 'ArrowUp',
+          ),
+        )
+        .subscribe((event) => {
+          switch (event.code) {
+            case 'ArrowDown':
+              // traverse down
+              this.setActiveFocusIndex('ArrowDown');
+              break;
+            case 'ArrowUp':
+              // traverse up
+              this.setActiveFocusIndex('ArrowUp');
+              break;
+            default:
+              this.searchTextChanged();
+          }
+        });
+
+      fromEvent(this.searchTermElementRef.nativeElement, 'keyup')
+        .pipe(takeUntil(this._destroy$))
+        .pipe(
+          // To make sure this doesn't interfere with other key events
+          filter(
+            (event: KeyboardEvent): boolean =>
+              event.code === 'ArrowDown' || event.code === 'ArrowUp',
+          ),
+        )
+        .subscribe((event) => {
+          switch (event.code) {
+            case 'ArrowDown':
+              // traverse down
+              this.setActiveFocusIndex('ArrowDown');
+              break;
+            case 'ArrowUp':
+              // traverse up
+              this.setActiveFocusIndex('ArrowUp');
+              break;
+          }
+        });
+    }
+  }
+}
+
+interface ISearchTerm {
+  display_name: string;
+  value: string;
+}
